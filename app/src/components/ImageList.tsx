@@ -9,6 +9,20 @@ interface ImageMeta {
   uploadedAt?: string
 }
 
+interface ViewUrlRequest {
+  id: string
+}
+
+interface ViewUrlResult {
+  id: string
+  url: string
+  expiresAt: string
+}
+
+interface ViewUrlsResponse {
+  results: ViewUrlResult[]
+}
+
 interface ImageListResponse {
   items: ImageMeta[]
   nextCursor?: string
@@ -16,6 +30,7 @@ interface ImageListResponse {
 
 const ImageList = () => {
   const [images, setImages] = useState<ImageMeta[]>([])
+  const [imageUrls, setImageUrls] = useState<Map<string, string>>(new Map())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -27,17 +42,51 @@ const ImageList = () => {
     try {
       setLoading(true)
       const response = await fetch('http://localhost:8080/images')
-      
+
       if (!response.ok) {
         throw new Error('Failed to fetch images')
       }
 
       const data: ImageListResponse = await response.json()
       setImages(data.items)
+
+      // Fetch presigned URLs for images
+      if (data.items.length > 0) {
+        await fetchImageUrls(data.items)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchImageUrls = async (imageList: ImageMeta[]) => {
+    try {
+      const requests: ViewUrlRequest[] = imageList.map(image => ({ id: image.id }))
+
+      const response = await fetch('http://localhost:8080/images/view-urls', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ requests })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch image URLs')
+      }
+
+      const data: ViewUrlsResponse = await response.json()
+      const urlMap = new Map<string, string>()
+
+      data.results.forEach(result => {
+        urlMap.set(result.id, result.url)
+      })
+
+      setImageUrls(urlMap)
+    } catch (err) {
+      console.error('Error fetching image URLs:', err)
     }
   }
 
@@ -89,12 +138,25 @@ const ImageList = () => {
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-gray-900">Images ({images.length})</h2>
       </div>
-      
+
       <div className="bg-white shadow overflow-hidden sm:rounded-md">
         <ul className="divide-y divide-gray-200">
           {images.map((image) => (
             <li key={image.id} className="px-6 py-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <div className="flex-shrink-0">
+                  {imageUrls.has(image.id) && image.mimeType.startsWith('image/') ? (
+                    <img
+                      src={imageUrls.get(image.id)}
+                      alt={image.originalName}
+                      className="w-16 h-16 object-cover rounded-lg border border-gray-200"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 bg-gray-100 rounded-lg border border-gray-200 flex items-center justify-center">
+                      <span className="text-gray-400 text-xs">No Preview</span>
+                    </div>
+                  )}
+                </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">
                     {image.originalName}
@@ -107,6 +169,16 @@ const ImageList = () => {
                   <p className="text-sm text-gray-500">
                     Uploaded {formatDate(image.uploadedAt)}
                   </p>
+                  {imageUrls.has(image.id) && (
+                    <a
+                      href={imageUrls.get(image.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-block mt-1 text-xs text-blue-600 hover:text-blue-800"
+                    >
+                      View Full Size
+                    </a>
+                  )}
                 </div>
               </div>
             </li>
